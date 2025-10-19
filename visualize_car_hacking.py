@@ -35,10 +35,11 @@ DEFAULT_FILES = [
     "normal_run_data.txt",
 ]
 
-PLOT_DIR = Path("plots_new_new_new_n ")
+PLOT_DIR = Path("plots_test_R2")
 SAMPLE_RATE = 1.0  # 如果内存有限，可把每个文件按比例抽样（0-1），1.0 表示不抽样
-RESAMPLE_SEC = 1   # 时间序列聚合的秒级窗口（用于消息率、注入率等）
+RESAMPLE_SEC = 10   # 时间序列聚合的秒级窗口（用于消息率、注入率等）
 TOP_N_IDS = 20     # 绘制最常见的 N 个 CAN ID
+TIME_WINDOW_SEC = 1
 
 # ---- 解析函数 ----
 def parse_space_separated_csv(path):
@@ -194,6 +195,9 @@ def basic_stats_and_time_index(df, name):
 def plot_message_rate(df, name, resample_sec=RESAMPLE_SEC):
     # 每秒消息数（或更粗的时间窗）
     s = df['CAN_ID'].resample(f"{resample_sec}s").count()
+    # # 直接统计行数呢？两个结果是相同的
+    # s = df.resample(f"{resample_sec}s").size()
+
     plt.figure(figsize=(12,4))
     s.plot()
     plt.title(f"{name} - message rate (per {resample_sec}s)")
@@ -218,117 +222,81 @@ def plot_injection_ratio_over_time(df, name, resample_sec=RESAMPLE_SEC):
     plt.savefig(p); plt.close()
     print(f"保存: {p}")
 
-# def plot_injection_ratio_over_time(df, name, resample_sec=RESAMPLE_SEC):
-#     """
-#     绘制注入消息占比随时间变化曲线，自动调整宽度。
-#     """
-#     # === 数据准备 ===
-#     grouped = (
-#         df[['Flag']]
-#         .resample(f"{resample_sec}s")['Flag']
-#         .apply(lambda x: (x == 'T').sum())
-#         .rename('injected')
-#     )
-#     total = (
-#         df['CAN_ID']
-#         .resample(f"{resample_sec}s")
-#         .count()
-#         .rename('total')
-#     )
-#     ratio = (grouped / total).fillna(0)
-#
-#     # === 自动调整图宽 ===
-#     # 比如每小时 1 英寸，最多 30 英寸（防止过大）
-#     time_span = (df.index.max() - df.index.min()).total_seconds()
-#     hours = time_span / 3600 if not pd.isna(time_span) else 1
-#     width = min(max(12, hours * 2), 30)  # 在 [12, 30] 范围内自适应
-#     height = 5
-#
-#     # === 绘图 ===
-#     plt.figure(figsize=(width, height))
-#     ratio.plot(color='tab:blue', linewidth=1.2)
-#     plt.title(f"{name} - injected ratio per {resample_sec}s", fontsize=13)
-#     plt.ylabel("injected ratio", fontsize=11)
-#     plt.xlabel("time", fontsize=11)
-#     plt.grid(True, linestyle='--', alpha=0.5)
-#
-#     # 避免横轴刻度过密
-#     plt.xticks(rotation=30, ha='right')
-#
-#     plt.tight_layout()
-#     p = PLOT_DIR / f"{name}_injected_ratio_per{resample_sec}s.png"
-#     plt.savefig(p, dpi=200)
-#     plt.close()
-#     print(f"✅ 保存: {p}（宽度 {width:.1f} 英寸）")
+def plot_rate_and_ratio(df, name, resample_sec=RESAMPLE_SEC):
+    """
+    在同一张图上绘制：
+      - 每秒消息数（蓝色）
+      - 注入消息比例（红色，右侧 Y 轴）
+    共享时间轴，便于比较攻击注入与总流量的关系。
+    """
+    # === 数据准备 ===
+    # 每秒消息总数
+    total = df.resample(f"{resample_sec}s").size().rename("total_msgs")
 
-# def plot_injection_ratio_over_time(df, name, resample_sec=RESAMPLE_SEC, segment_minutes=10):
-#     """
-#     绘制注入消息占比随时间变化曲线。
-#     按 segment_minutes 分段绘制多张图（最后不足一段也单独成图）。
-#     """
-#
-#     # === 数据准备 ===
-#     grouped = (
-#         df[['Flag']]
-#         .resample(f"{resample_sec}s")['Flag']
-#         .apply(lambda x: (x == 'T').sum())
-#         .rename('injected')
-#     )
-#     total = (
-#         df['CAN_ID']
-#         .resample(f"{resample_sec}s")
-#         .count()
-#         .rename('total')
-#     )
-#     ratio = (grouped / total).fillna(0)
-#
-#     # === 时间范围划分 ===
-#     start_time = ratio.index.min()
-#     end_time = ratio.index.max()
-#     segment_delta = pd.Timedelta(minutes=segment_minutes)
-#
-#     if pd.isna(start_time) or pd.isna(end_time):
-#         print(f"⚠️ {name} 没有有效时间索引，跳过绘图。")
-#         return
-#
-#     current_start = start_time
-#     segment_index = 1
-#
-#     while current_start < end_time:
-#         current_end = min(current_start + segment_delta, end_time)
-#         seg_ratio = ratio.loc[current_start:current_end]
-#
-#         if seg_ratio.empty:
-#             current_start = current_end
-#             continue
-#
-#         # === 绘图 ===
-#         plt.figure(figsize=(12, 5))
-#         seg_ratio.plot(color='tab:blue', linewidth=1.2)
-#         plt.title(
-#             f"{name} - injected ratio per {resample_sec}s\n"
-#             f"{current_start.strftime('%H:%M:%S')} - {current_end.strftime('%H:%M:%S')}",
-#             fontsize=13
-#         )
-#         plt.ylabel("injected ratio", fontsize=11)
-#         plt.xlabel("time", fontsize=11)
-#         plt.grid(True, linestyle='--', alpha=0.5)
-#         plt.xticks(rotation=30, ha='right')
-#
-#         plt.tight_layout()
-#
-#         # === 保存 ===
-#         p = PLOT_DIR / f"{name}_injected_ratio_{segment_index:02d}_per{resample_sec}s.png"
-#         plt.savefig(p, dpi=200)
-#         plt.close()
-#
-#         print(f"✅ 保存分段图 {segment_index}: {p} ({current_start.strftime('%H:%M:%S')} → {current_end.strftime('%H:%M:%S')})")
-#
-#         # 下一个时间段
-#         segment_index += 1
-#         current_start = current_end
+    # 每秒注入消息数量
+    injected = df[['Flag']].resample(f"{resample_sec}s")['Flag'].apply(lambda x: (x == 'T').sum()).rename("injected")
 
+    # 注入比例
+    ratio = (injected / total).fillna(0)
 
+    # === 绘图 ===
+    fig, ax1 = plt.subplots(figsize=(12, 5))
+    ax1.plot(total.index, total.values, color='tab:blue', label='Message Rate')
+    ax1.set_xlabel("Time")
+    ax1.set_ylabel("Messages per window", color='tab:blue')
+    ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+    # 第二个 Y 轴（右侧）
+    ax2 = ax1.twinx()
+    ax2.plot(ratio.index, ratio.values, color='tab:red', linestyle='--', label='Injection Ratio')
+    ax2.set_ylabel("Injection Ratio", color='tab:red')
+    ax2.tick_params(axis='y', labelcolor='tab:red')
+
+    # 图标题和布局
+    plt.title(f"{name} - Message Rate & Injection Ratio (per {resample_sec}s)")
+    fig.tight_layout()
+
+    # 图例（同时显示两条线的标签）
+    lines, labels = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines + lines2, labels + labels2, loc='upper right')
+
+    # 保存
+    p = PLOT_DIR / f"{name}_rate_and_ratio_per{resample_sec}s.png"
+    plt.savefig(p, dpi=200)
+    plt.close()
+    print(f"✅ 保存: {p}")
+
+def plot_rate_and_ratio_normalized(df, name, resample_sec=RESAMPLE_SEC):
+    """
+    绘制 归一化后的消息速率 与 注入比例 曲线（同一坐标轴）。
+    便于比较二者的相对变化趋势。
+    """
+    # === 数据准备 ===
+    total = df.resample(f"{resample_sec}s").size().rename("total_msgs")
+    injected = df[['Flag']].resample(f"{resample_sec}s")['Flag'].apply(lambda x: (x == 'T').sum()).rename("injected")
+    ratio = (injected / total).fillna(0)
+
+    # --- 归一化 ---
+    total_norm = (total - total.min()) / (total.max() - total.min() + 1e-9)
+    ratio_norm = (ratio - ratio.min()) / (ratio.max() - ratio.min() + 1e-9)
+
+    # === 绘图 ===
+    plt.figure(figsize=(12, 5))
+    plt.plot(total_norm.index, total_norm.values, color='tab:blue', label='Message Rate (normalized)')
+    plt.plot(ratio_norm.index, ratio_norm.values, color='tab:red', linestyle='--', label='Injection Ratio (normalized)')
+    plt.title(f"{name} - Normalized Message Rate & Injection Ratio (per {resample_sec}s)", fontsize=13)
+    plt.xlabel("Time")
+    plt.ylabel("Normalized Value (0–1)")
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.legend(loc='upper right')
+    plt.tight_layout()
+
+    # === 保存 ===
+    p = PLOT_DIR / f"{name}_rate_and_ratio_normalized_per{resample_sec}s.png"
+    plt.savefig(p, dpi=200)
+    plt.close()
+    print(f"✅ 保存: {p}")
 
 def plot_top_ids(df, name, top_n=TOP_N_IDS):
     top = df['CAN_ID'].value_counts().head(top_n)
@@ -341,155 +309,13 @@ def plot_top_ids(df, name, top_n=TOP_N_IDS):
     plt.savefig(p); plt.close()
     print(f"保存: {p}")
 
-# def plot_interarrival_hist(df, name, sample_ids=None):
-#     # 全局报文到达间隔分布（秒）
-#     df_sorted = df.sort_index()
-#     # compute deltas in seconds
-#     timestamps = df_sorted['Timestamp'].values
-#     deltas = np.diff(timestamps)
-#     plt.figure(figsize=(8,4))
-#     plt.hist(deltas[deltas>0], bins=200, log=True)
-#     plt.title(f"{name} - inter-arrival times (log y)")
-#     plt.xlabel("seconds"); plt.ylabel("count (log)")
-#     plt.tight_layout()
-#     p = PLOT_DIR / f"{name}_interarrival_hist.png"
-#     plt.savefig(p); plt.close()
-#     print(f"保存: {p}")
-#
-#     # 对若干热门 ID 分别绘制间隔分布
-#     top_ids = list(df['CAN_ID'].value_counts().head(5).index) if sample_ids is None else sample_ids
-#     for cid in top_ids:
-#         sub = df[df['CAN_ID']==cid].sort_index()
-#         ts = sub['Timestamp'].values
-#         if len(ts) < 2:
-#             continue
-#         deltas = np.diff(ts)
-#         plt.figure(figsize=(6,3))
-#         plt.hist(deltas[deltas>0], bins=100)
-#         plt.title(f"{name} - interarrival for ID {cid} (n={len(ts)})")
-#         plt.xlabel("seconds"); plt.tight_layout()
-#         p = PLOT_DIR / f"{name}_interarrival_id_{cid}.png"
-#         plt.savefig(p); plt.close()
-def plot_interarrival_hist(df, name, sample_ids=None, max_interval=1.0):
+def plot_data_combined_hex(df, name, cid=None, highlight_injections=True):
     """
-    绘制报文到达间隔分布。
-    自动去除超过 max_interval 秒的极端长间隔，防止横轴被拉伸。
+    将 DATA0~DATA7 拼成一个 64 位整数（视作整体 payload）绘图。
+    🔴 注入数据 (Flag=='T') 用红点标注。
     """
-    df_sorted = df.sort_index()
-    timestamps = df_sorted['Timestamp'].values
-    deltas = np.diff(timestamps)
-    deltas = deltas[deltas > 0]
+    import numpy as np
 
-    # === 限制横轴范围 ===
-    filtered = deltas[deltas <= max_interval]
-    if len(filtered) == 0:
-        print(f"⚠️ {name}: 所有间隔都超过 {max_interval}s，跳过绘图。")
-        return
-
-    plt.figure(figsize=(8,4))
-    plt.hist(filtered, bins=200, log=True)
-    plt.title(f"{name} - inter-arrival times (<= {max_interval}s, log y)")
-    plt.xlabel("interval (s)")
-    plt.ylabel("count (log)")
-    plt.tight_layout()
-    p = PLOT_DIR / f"{name}_interarrival_hist.png"
-    plt.savefig(p, dpi=150)
-    plt.close()
-    print(f"✅ 保存: {p} （已过滤 >{max_interval}s 的极端值）")
-
-    # === 各 ID 子图 ===
-    top_ids = list(df['CAN_ID'].value_counts().head(5).index) if sample_ids is None else sample_ids
-    for cid in top_ids:
-        sub = df[df['CAN_ID']==cid].sort_index()
-        ts = sub['Timestamp'].values
-        if len(ts) < 2:
-            continue
-        deltas = np.diff(ts)
-        deltas = deltas[(deltas > 0) & (deltas <= max_interval)]
-        if len(deltas) == 0:
-            continue
-        plt.figure(figsize=(6,3))
-        plt.hist(deltas, bins=100)
-        plt.title(f"{name} - ID {cid} interarrival (<= {max_interval}s)")
-        plt.xlabel("seconds")
-        plt.tight_layout()
-        p = PLOT_DIR / f"{name}_interarrival_id_{cid}.png"
-        plt.savefig(p, dpi=150)
-        plt.close()
-
-
-def plot_data_bytes_heatmap(df, name, cid=None, window_seconds=10):
-    # 对指定 CAN ID，在时间轴上绘制 DATA0~DATA7 的 heatmap（值 0-255）
-    if cid is None:
-        # 选择最活跃的 ID
-        cid = df['CAN_ID'].value_counts().idxmax()
-    sub = df[df['CAN_ID']==cid].copy()
-    if sub.empty:
-        print(f"{name}: ID {cid} 没有数据，跳过 heatmap")
-        return
-    # 按较小时间窗口聚合（mean）
-    agg = sub[['DATA0','DATA1','DATA2','DATA3','DATA4','DATA5','DATA6','DATA7']].resample(f"{window_seconds}s").mean()
-    if agg.dropna(how='all').empty:
-        print(f"{name}: 聚合后无数据，跳过 heatmap")
-        return
-    plt.figure(figsize=(12,4))
-    sns.heatmap(agg.T, cbar=True)
-    plt.title(f"{name} - data bytes heatmap for CAN ID {cid} (window {window_seconds}s)")
-    plt.ylabel("byte index"); plt.xlabel("time-window index")
-    plt.tight_layout()
-    p = PLOT_DIR / f"{name}_heatmap_id_{cid}.png"
-    plt.savefig(p); plt.close()
-    print(f"保存: {p}")
-
-
-# def plot_data_bytes_lines(df, name, cid=None, window_seconds=10):
-#     """
-#     对指定 CAN ID 绘制 DATA0~DATA7 随时间变化的折线图。
-#     每个数据字节一条曲线，8 种颜色。
-#     """
-#     if cid is None:
-#         cid = df['CAN_ID'].value_counts().idxmax()
-#
-#     sub = df[df['CAN_ID'] == cid].copy()
-#     if sub.empty:
-#         print(f"{name}: ID {cid} 没有数据，跳过绘图")
-#         return
-#
-#     # 按时间窗口聚合平均值
-#     agg = (
-#         sub[['DATA0','DATA1','DATA2','DATA3','DATA4','DATA5','DATA6','DATA7']]
-#         .resample(f"{window_seconds}s")
-#         .mean()
-#     )
-#     if agg.dropna(how='all').empty:
-#         print(f"{name}: 聚合后无数据，跳过绘图")
-#         return
-#
-#     # === 绘制折线图 ===
-#     plt.figure(figsize=(12, 5))
-#     colors = plt.cm.tab10.colors  # 8 种常用颜色
-#     for i, col in enumerate(agg.columns):
-#         plt.plot(agg.index, agg[col], label=col, color=colors[i % len(colors)], linewidth=1.2)
-#
-#     plt.title(f"{name} - DATA0~7 over time for CAN ID {cid} (window {window_seconds}s)", fontsize=13)
-#     plt.xlabel("Time")
-#     plt.ylabel("Byte value (0–255)")
-#     plt.ylim(0, 255)
-#     plt.grid(True, linestyle='--', alpha=0.4)
-#     plt.legend(ncol=4, fontsize=9, loc='upper right')
-#     plt.tight_layout()
-#
-#     p = PLOT_DIR / f"{name}_data_bytes_lines_id_{cid}.png"
-#     plt.savefig(p, dpi=200)
-#     plt.close()
-#     print(f"✅ 保存: {p} （DATA0~7 折线图）")
-
-def plot_data_bytes_lines(df, name, cid=None, window_seconds=10):
-    """
-    对指定 CAN ID 绘制 DATA0~DATA7 随时间变化的折线图：
-    1️⃣ 一张总览图（8 条线叠加）
-    2️⃣ 每条线单独一张图，保持与总图相同坐标比例
-    """
     if cid is None:
         cid = df['CAN_ID'].value_counts().idxmax()
 
@@ -498,71 +324,226 @@ def plot_data_bytes_lines(df, name, cid=None, window_seconds=10):
         print(f"{name}: ID {cid} 没有数据，跳过绘图")
         return
 
-    # ===== 按时间窗口聚合平均值 =====
-    agg = (
-        sub[['DATA0','DATA1','DATA2','DATA3','DATA4','DATA5','DATA6','DATA7']]
-        .resample(f"{window_seconds}s")
-        .mean()
-    )
+    # === 确保时间索引 ===
+    if not isinstance(sub.index, pd.DatetimeIndex):
+        if "Timestamp" in sub.columns:
+            sub.index = pd.to_datetime(sub["Timestamp"], unit="s")
 
-    if agg.dropna(how='all').empty:
-        print(f"{name}: 聚合后无数据，跳过绘图")
+    # === 构造 64 位整数（假设 DATA0 是最高位，DATA7 是最低位）===
+    cols = [f"DATA{i}" for i in range(8) if f"DATA{i}" in sub.columns]
+    if len(cols) < 8:
+        print(f"{name}: ID {cid} 数据字段不完整（{len(cols)}/8），跳过拼接。")
         return
 
-    # === 总览图 ===
-    plt.figure(figsize=(12, 5))
-    colors = plt.cm.tab10.colors  # 8 种颜色
-    for i, col in enumerate(agg.columns):
-        plt.plot(agg.index, agg[col], label=col, color=colors[i % len(colors)], linewidth=1.2)
+    payload = np.zeros(len(sub), dtype=np.uint64)
+    for i in range(8):
+        payload = np.left_shift(payload, 8) + sub[f"DATA{i}"].astype(np.uint64)
 
-    plt.title(f"{name} - DATA0~7 over time for CAN ID {cid} (window {window_seconds}s)", fontsize=13)
+    sub["payload"] = payload
+    sub["payload_norm"] = np.log1p(payload)
+
+    inj = sub[sub["Flag"] == "T"]
+    normal = sub[sub["Flag"] != "T"]
+
+    # === 绘图 ===
+    plt.figure(figsize=(14, 5))
+    plt.plot(normal.index, normal["payload_norm"], color="blue", linewidth=1.0, label="Normal (log payload)")
+    if highlight_injections and not inj.empty:
+        plt.scatter(inj.index, inj["payload_norm"], color="red", s=20, alpha=0.5, label="Injection")
+
+    plt.title(f"{name} - Combined DATA0–7 (log scaled) for CAN ID {cid}", fontsize=13)
     plt.xlabel("Time")
-    plt.ylabel("Byte value (0–255)")
-    plt.ylim(0, 255)
+    plt.ylabel("log(1 + payload value)")
     plt.grid(True, linestyle='--', alpha=0.4)
-    plt.legend(ncol=4, fontsize=9, loc='upper right')
+    plt.legend(loc='upper right', fontsize=9)
     plt.tight_layout()
 
-    p_total = PLOT_DIR / f"{name}_data_bytes_lines_id_{cid}_ALL.png"
-    plt.savefig(p_total, dpi=200)
+    p = PLOT_DIR / f"{name}_data_combined_hex_id_{cid}.png"
+    plt.savefig(p, dpi=200)
     plt.close()
-    print(f"✅ 保存: {p_total}（总览图）")
+    print(f"✅ 保存: {p}（DATA0~7 合并曲线）")
 
-    # === 单独绘制每个 DATAi ===
-    for i, col in enumerate(agg.columns):
-        plt.figure(figsize=(12, 3))
-        plt.plot(agg.index, agg[col], color=colors[i % len(colors)], linewidth=1.5)
-        plt.title(f"{name} - {col} over time for CAN ID {cid} (window {window_seconds}s)", fontsize=12)
+def plot_id_timewindow_scatter(df, name, window_seconds=TIME_WINDOW_SEC, top_n=100, injection_alpha=0.3):
+    """
+    按时间窗口聚合的 CAN ID 散点图：
+    - 分别绘制正常数据、注入数据、以及综合图。
+    - 横轴：时间窗口（实际时间刻度），三幅图横轴范围统一。
+    - 纵轴：CAN ID（取出现频率最高的 top_n 个）。
+    """
+
+    # === 确保索引是 DatetimeIndex ===
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if "Timestamp" in df.columns:
+            df = df.copy()
+            df.index = pd.to_datetime(df["Timestamp"], unit="s")
+        else:
+            print(f"{name}: 无 Timestamp 字段，无法按时间聚合")
+            return
+
+    # === 取最常出现的 top_n IDs ===
+    top_ids = df["CAN_ID"].value_counts().head(top_n).index
+    sub = df[df["CAN_ID"].isin(top_ids)].copy()
+    if sub.empty:
+        print(f"{name}: 无有效 CAN ID 数据")
+        return
+
+    # === 创建时间窗口（floor 到最近的 window_seconds）===
+    sub["time_bin"] = sub.index.floor(f"{window_seconds}s")
+
+    # === 数值化 CAN ID 以便绘图 ===
+    id_map = {cid: i for i, cid in enumerate(sorted(top_ids))}
+    sub["id_ord"] = sub["CAN_ID"].map(id_map)
+
+    # === 区分注入与正常消息 ===
+    inj = sub[sub["Flag"] == "T"]
+    normal = sub[sub["Flag"] != "T"]
+
+    # === 统一横轴范围 ===
+    xmin = sub["time_bin"].min()
+    xmax = sub["time_bin"].max()
+
+    # -------------------------------------------------
+    # ① 仅正常数据
+    # -------------------------------------------------
+    plt.figure(figsize=(12, 6))
+    plt.scatter(normal["time_bin"], normal["id_ord"], s=3, color="blue", alpha=0.8)
+    plt.title(f"{name} - Normal CAN frames (top {top_n} IDs)", fontsize=13)
+    plt.xlabel("Time")
+    plt.ylabel("CAN ID (ordinal index)")
+    plt.yticks(range(len(top_ids)), sorted(top_ids), fontsize=8)
+    plt.xlim(xmin, xmax)  # ✅ 统一横轴范围
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.tight_layout()
+
+    p_normal = PLOT_DIR / f"{name}_id_timewindow_scatter_normal_{window_seconds}s.png"
+    plt.savefig(p_normal, dpi=200)
+    plt.close()
+    print(f"✅ 保存: {p_normal}（正常数据）")
+
+    # -------------------------------------------------
+    # ② 仅注入数据
+    # -------------------------------------------------
+    if not inj.empty:
+        plt.figure(figsize=(12, 6))
+        plt.scatter(inj["time_bin"], inj["id_ord"], s=6, color="red", alpha=0.8)
+        plt.title(f"{name} - Injection frames (top {top_n} IDs)", fontsize=13)
         plt.xlabel("Time")
-        plt.ylabel("Byte value (0–255)")
-        plt.ylim(0, 255)  # 与总览图统一比例
-        plt.grid(True, linestyle='--', alpha=0.5)
+        plt.ylabel("CAN ID (ordinal index)")
+        plt.yticks(range(len(top_ids)), sorted(top_ids), fontsize=8)
+        plt.xlim(xmin, xmax)  # ✅ 统一横轴范围
+        plt.grid(True, linestyle="--", alpha=0.3)
         plt.tight_layout()
 
-        p_single = PLOT_DIR / f"{name}_data_byte_{col}_id_{cid}.png"
-        plt.savefig(p_single, dpi=200)
+        p_inj = PLOT_DIR / f"{name}_id_timewindow_scatter_injection_{window_seconds}s.png"
+        plt.savefig(p_inj, dpi=200)
         plt.close()
-        print(f"  └─ 保存单独曲线图: {p_single}")
+        print(f"✅ 保存: {p_inj}（注入数据）")
 
+    # -------------------------------------------------
+    # ③ 综合图（蓝 + 红）
+    # -------------------------------------------------
+    plt.figure(figsize=(12, 6))
+    plt.scatter(normal["time_bin"], normal["id_ord"], s=3, color="blue", alpha=0.8, label="Normal")
+    if not inj.empty:
+        plt.scatter(inj["time_bin"], inj["id_ord"], s=6, color="red", alpha=injection_alpha, label="Injection")
 
-def plot_id_time_scatter(df, name, top_n=1000):
-    # 散点：时间 vs CAN ID（ID 转为排序索引以便展示）
-    vc = df['CAN_ID'].value_counts()
-    top_ids = vc.head(200).index  # 取前 200 id 来绘图
-    sub = df[df['CAN_ID'].isin(top_ids)].copy()
-    if sub.empty:
-        return
-    # map ID to ordinal
-    id_map = {cid:i for i,cid in enumerate(sorted(top_ids))}
-    sub['id_ord'] = sub['CAN_ID'].map(id_map)
-    plt.figure(figsize=(12,6))
-    plt.scatter(sub['Timestamp'], sub['id_ord'], s=1)
-    plt.title(f"{name} - time vs CAN ID (top {len(top_ids)} IDs)")
-    plt.xlabel("timestamp (s)"); plt.ylabel("CAN ID ordinal")
+    plt.title(f"{name} - Normal + Injection frames (window {window_seconds}s)", fontsize=13)
+    plt.xlabel("Time")
+    plt.ylabel("CAN ID (ordinal index)")
+    plt.yticks(range(len(top_ids)), sorted(top_ids), fontsize=8)
+    plt.xlim(xmin, xmax)  # ✅ 统一横轴范围
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.legend(loc="upper right", fontsize=9)
     plt.tight_layout()
-    p = PLOT_DIR / f"{name}_time_vs_id_scatter.png"
-    plt.savefig(p); plt.close()
-    print(f"保存: {p}")
+
+    p_combined = PLOT_DIR / f"{name}_id_timewindow_scatter_combined_{window_seconds}s.png"
+    plt.savefig(p_combined, dpi=200)
+    plt.close()
+    print(f"✅ 保存: {p_combined}（综合图：蓝=正常，红=注入，alpha={injection_alpha}）")
+
+def plot_data_bytes_heatmap_raw(df, name, cid=None):
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    if cid is None:
+        cid = df['CAN_ID'].value_counts().idxmax()
+
+    sub = df[df['CAN_ID'] == cid].copy()
+    if sub.empty:
+        print(f"{name}: ID {cid} 没有数据，跳过绘图")
+        return
+
+    # ✅ 保留原始 timestamp，不转 datetime
+    if "Timestamp" not in sub.columns:
+        print(f"{name}: 无 Timestamp 字段，无法绘图")
+        return
+
+    # === 只取 DATA0~7 与 Timestamp ===
+    cols = [f"DATA{i}" for i in range(8) if f"DATA{i}" in sub.columns]
+    data = sub[cols].T  # 转置，使 DATA0~7 为行
+    timestamps = sub["Timestamp"].values
+
+    sub_orig = sub.copy()
+
+    # # 若数据太多，可进行稀疏采样
+    # if len(data.columns) > 2000:
+    #     step = max(1, len(data.columns)//2000)
+    #     data = data.iloc[:, ::step]
+    #     timestamps = timestamps[::step]
+    #     # 同步注入点稀疏
+    #     sub = sub.iloc[::step, :]
+
+    # === 画原始热力图 ===
+    plt.figure(figsize=(14, 4))
+    sns.heatmap(data, cmap="viridis", cbar=True, vmin=0, vmax=255)
+    plt.title(f"{name} - DATA0~7 heatmap (raw timestamp, CAN ID {cid})", fontsize=12)
+    plt.ylabel("Byte index (DATA0–DATA7)")
+    plt.xlabel("Timestamp (s)")
+    plt.xticks(
+        np.linspace(0, len(timestamps)-1, 10),
+        [f"{t:.2f}" for t in np.linspace(timestamps[0], timestamps[-1], 10)],
+        rotation=45, ha="right"
+    )
+    plt.tight_layout()
+    p1 = PLOT_DIR / f"{name}_heatmap_raw_timestamp_id_{cid}.png"
+    plt.savefig(p1, dpi=200)
+    plt.close()
+    print(f"✅ 保存: {p1}（基础热力图）")
+
+    # === 带注入标记的版本 ===
+    inj_ts = sub.loc[sub["Flag"] == "T", "Timestamp"].values
+    if len(inj_ts) == 0:
+        print(f"{name}: 没有注入数据，跳过注入标注图。")
+        return
+
+    plt.figure(figsize=(14, 4))
+    ax = sns.heatmap(data, cmap="viridis", cbar=True, vmin=0, vmax=255)
+    plt.title(f"{name} - DATA0~7 heatmap with injections (CAN ID {cid})", fontsize=12)
+    plt.ylabel("Byte index (DATA0–DATA7)")
+    plt.xlabel("Timestamp (s)")
+
+    # ✅ 设置横轴刻度
+    plt.xticks(
+        np.linspace(0, len(timestamps)-1, 10),
+        [f"{t:.2f}" for t in np.linspace(timestamps[0], timestamps[-1], 10)],
+        rotation=45, ha="right"
+    )
+
+    # ✅ 在注入点处画竖线（半透明红色）
+    inj_indices = np.searchsorted(timestamps, inj_ts)
+    for idx in inj_indices:
+        if 0 <= idx < len(timestamps):
+            plt.axvline(idx, color="red", alpha=0.15, linewidth=1.2)
+
+    plt.tight_layout()
+    p2 = PLOT_DIR / f"{name}_heatmap_raw_timestamp_id_{cid}_with_injections.png"
+    plt.savefig(p2, dpi=200)
+    plt.close()
+    print(f"✅ 保存: {p2}（带注入标记的热力图）")
+
+    print("注入点总数 (原始 sub):", sub_orig['Flag'].eq('T').sum())
+    print("注入点数 (采样后 sub):", sub['Flag'].eq('T').sum())
 
 # ---- 主流程 ----
 def process_file(path, name, sample_rate=SAMPLE_RATE):
@@ -580,13 +561,17 @@ def process_file(path, name, sample_rate=SAMPLE_RATE):
     ensure_plot_dir()
     plot_message_rate(df, name)
     plot_injection_ratio_over_time(df, name)
+    plot_rate_and_ratio(df, name)  # 双轴图（原始值）
+    plot_rate_and_ratio_normalized(df, name)  # 单轴归一化图（对比趋势）
     plot_top_ids(df, name)
-    plot_interarrival_hist(df, name)
-    # heatmap for most active ID
+
     top_id = df['CAN_ID'].value_counts().idxmax()
-    # plot_data_bytes_heatmap(df, name, cid=top_id)
-    plot_data_bytes_lines(df, name, cid=top_id)
-    plot_id_time_scatter(df, name)
+    plot_data_combined_hex(df, name, cid=top_id)
+    plot_id_timewindow_scatter(df, name)
+
+    # heatmap for most active ID
+    # plot_data_bytes_heatmap_raw(df, name, cid=top_id)
+
     # 返回 df 以便合并/进一步分析
     return df
 
@@ -601,39 +586,6 @@ def main(data_dir, files):
         name = Path(fname).stem
         df = process_file(p, name)
         processed[name] = df
-    # 如果想把多个文件合并做总体视图：
-    if processed:
-        print("\n正在合并所有数据（用于总体统计，如 global top IDs）...")
-        all_df = pd.concat(processed.values(), ignore_index=False).sort_index()
-        # 全局热图：最常见的 30 ID 的每秒消息率矩阵（示例）
-        ensure_plot_dir()
-        top_ids = all_df['CAN_ID'].value_counts().head(30).index
-        # todo 新版本pandas适应
-        # pivot = all_df[all_df['CAN_ID'].isin(top_ids)]['CAN_ID'].resample(f"{RESAMPLE_SEC}S").apply(lambda x: x.value_counts()).unstack(fill_value=0)
-        tmp = all_df[all_df['CAN_ID'].isin(top_ids)].copy()
-        # 以时间和 CAN_ID 双重分组统计每秒的出现次数
-        pivot = (
-            tmp
-            .groupby([pd.Grouper(freq=f"{RESAMPLE_SEC}s"), "CAN_ID"])
-            .size()
-            .unstack(fill_value=0)
-        )
-        # pivot 可能非常大；这里只保存前三十 id 的简版热图（按时间）
-        plt.figure(figsize=(12,6))
-        sns.heatmap(pivot.T, cmap='viridis')
-        plt.title("Global - per-second counts for top 30 CAN IDs (rows=CAN ID, cols=time-window)")
-        plt.tight_layout()
-        p = PLOT_DIR / f"global_top30_ids_time_heatmap.png"
-        plt.savefig(p); plt.close()
-        print(f"保存: {p}")
-        # 也保存全局 top IDs bar
-        plt.figure(figsize=(10,8))
-        all_df['CAN_ID'].value_counts().head(50).plot(kind='barh')
-        plt.title("Global - top 50 CAN IDs")
-        plt.tight_layout()
-        p = PLOT_DIR / f"global_top50_ids.png"
-        plt.savefig(p); plt.close()
-        print(f"保存: {p}")
 
     print("\n全部完成。所有图保存在 ./plots/ 目录下。")
 
