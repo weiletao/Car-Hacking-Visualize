@@ -35,7 +35,7 @@ DEFAULT_FILES = [
     "normal_run_data.txt",
 ]
 
-PLOT_DIR = Path("plots_test_R2")
+PLOT_DIR = Path("plots")
 SAMPLE_RATE = 1.0  # 如果内存有限，可把每个文件按比例抽样（0-1），1.0 表示不抽样
 RESAMPLE_SEC = 10   # 时间序列聚合的秒级窗口（用于消息率、注入率等）
 TOP_N_IDS = 20     # 绘制最常见的 N 个 CAN ID
