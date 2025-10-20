@@ -35,7 +35,7 @@ DEFAULT_FILES = [
     "normal_run_data.txt",
 ]
 
-PLOT_DIR = Path("plots")
+PLOT_DIR = Path("plots_test_R8")
 SAMPLE_RATE = 1.0  # 如果内存有限，可把每个文件按比例抽样（0-1），1.0 表示不抽样
 RESAMPLE_SEC = 10   # 时间序列聚合的秒级窗口（用于消息率、注入率等）
 TOP_N_IDS = 20     # 绘制最常见的 N 个 CAN ID
@@ -545,6 +545,145 @@ def plot_data_bytes_heatmap_raw(df, name, cid=None):
     print("注入点总数 (原始 sub):", sub_orig['Flag'].eq('T').sum())
     print("注入点数 (采样后 sub):", sub['Flag'].eq('T').sum())
 
+# def plot_data_bytes_timeseries_raw(df, name, cid=None):
+#     import matplotlib.pyplot as plt
+#     import numpy as np
+#
+#     if cid is None:
+#         cid = df['CAN_ID'].value_counts().idxmax()
+#
+#     sub = df[df['CAN_ID'] == cid].copy()
+#     if sub.empty:
+#         print(f"{name}: ID {cid} 没有数据，跳过绘图")
+#         return
+#
+#     if "Timestamp" not in sub.columns:
+#         print(f"{name}: 无 Timestamp 字段，无法绘图")
+#         return
+#
+#     # === 只取 DATA0~7 与 Timestamp ===
+#     cols = [f"DATA{i}" for i in range(8) if f"DATA{i}" in sub.columns]
+#     timestamps = sub["Timestamp"].values
+#     data = sub[cols].values
+#
+#     # === 获取注入时间戳 ===
+#     inj_ts = sub.loc[sub["Flag"] == "T", "Timestamp"].values
+#
+#     # === 画折线图 ===
+#     plt.figure(figsize=(14, 6))
+#     for i in range(8):
+#         plt.plot(timestamps, data[:, i], label=f"DATA{i}", linewidth=0.8)
+#
+#     # === 标注注入区段（透明竖线） ===
+#     if len(inj_ts) > 0:
+#         inj_indices = np.searchsorted(timestamps, inj_ts)
+#         for idx in inj_indices:
+#             if 0 <= idx < len(timestamps):
+#                 plt.axvline(timestamps[idx], color="red", alpha=0.08, linewidth=1)
+#
+#     plt.title(f"{name} - DATA0~7 Time Series (CAN ID {cid})", fontsize=12)
+#     plt.xlabel("Timestamp (s)")
+#     plt.ylabel("Byte Value (0–255)")
+#     plt.legend(loc="upper right", ncol=4, fontsize=8)
+#     plt.grid(alpha=0.3)
+#     plt.tight_layout()
+#
+#     p = PLOT_DIR / f"{name}_timeseries_raw_timestamp_id_{cid}.png"
+#     plt.savefig(p, dpi=200)
+#     plt.close()
+#
+#     print(f"✅ 保存: {p}（8通道时间序列图）")
+# def plot_data_bytes_timeseries_raw(df, name, cid=None):
+#     import matplotlib.pyplot as plt
+#     import numpy as np
+#
+#     if cid is None:
+#         cid = df['CAN_ID'].value_counts().idxmax()
+#
+#     sub = df[df['CAN_ID'] == cid].copy()
+#     if sub.empty:
+#         print(f"{name}: ID {cid} 没有数据，跳过绘图")
+#         return
+#
+#     if "Timestamp" not in sub.columns:
+#         print(f"{name}: 无 Timestamp 字段，无法绘图")
+#         return
+#
+#     # === 只取 DATA0~7 与 Timestamp ===
+#     cols = [f"DATA{i}" for i in range(8) if f"DATA{i}" in sub.columns]
+#     timestamps = sub["Timestamp"].values
+#     data = sub[cols].values
+#
+#     # === 单独绘制每个 DATA 字节的时间序列 ===
+#     for i, col in enumerate(cols):
+#         plt.figure(figsize=(14, 3))
+#         plt.plot(timestamps, data[:, i], color="C0", linewidth=0.8)
+#         plt.title(f"{name} - {col} Time Series (CAN ID {cid})", fontsize=11)
+#         plt.xlabel("Timestamp (s)")
+#         plt.ylabel("Byte Value (0–255)")
+#         plt.grid(alpha=0.3)
+#         plt.tight_layout()
+#
+#         # 保存每个通道的独立图像
+#         p = PLOT_DIR / f"{name}_timeseries_raw_timestamp_id_{cid}_{col}.png"
+#         plt.savefig(p, dpi=200)
+#         plt.close()
+#
+#         print(f"✅ 保存: {p}（{col} 时间序列图）")
+def plot_data_bytes_timeseries_raw(df, name, cid=None, max_points=500, wide_fig=True):
+    """
+    绘制 DATA0~7 的单独时间序列图。
+    - 自动降采样避免点过密
+    - 可选加宽画布
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    if cid is None:
+        cid = df['CAN_ID'].value_counts().idxmax()
+
+    sub = df[df['CAN_ID'] == cid].copy()
+    if sub.empty:
+        print(f"{name}: ID {cid} 没有数据，跳过绘图")
+        return
+
+    if "Timestamp" not in sub.columns:
+        print(f"{name}: 无 Timestamp 字段，无法绘图")
+        return
+
+    # === 只取 DATA0~7 与 Timestamp ===
+    cols = [f"DATA{i}" for i in range(8) if f"DATA{i}" in sub.columns]
+    timestamps = sub["Timestamp"].values
+    data = sub[cols].values
+
+    # === 自动降采样 ===
+    if len(timestamps) > max_points:
+        step = len(timestamps) // max_points
+        timestamps = timestamps[::step]
+        data = data[::step, :]
+        print(f"⚙️ 数据量过大，已降采样: 每 {step} 个点取 1 个（总 {len(timestamps)} 点）")
+
+    # === 设置画布宽度 ===
+    fig_width = 18 if wide_fig else 14
+
+    # === 分别绘制每个 DATA 通道 ===
+    for i, col in enumerate(cols):
+        plt.figure(figsize=(fig_width, 3))
+        plt.plot(timestamps, data[:, i], color="C0", linewidth=0.8)
+        plt.title(f"{name} - {col} Time Series (CAN ID {cid})", fontsize=11)
+        plt.xlabel("Timestamp (s)")
+        plt.ylabel("Byte Value (0–255)")
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+
+        # 保存图像
+        p = PLOT_DIR / f"{name}_timeseries_raw_timestamp_id_{cid}_{col}.png"
+        plt.savefig(p, dpi=200)
+        plt.close()
+
+        print(f"✅ 保存: {p}（{col} 时间序列图）")
+
+
 # ---- 主流程 ----
 def process_file(path, name, sample_rate=SAMPLE_RATE):
     print(f"\n读取 {path} ...")
@@ -559,18 +698,20 @@ def process_file(path, name, sample_rate=SAMPLE_RATE):
     df = basic_stats_and_time_index(df, name)
     # 绘图
     ensure_plot_dir()
-    plot_message_rate(df, name)
-    plot_injection_ratio_over_time(df, name)
-    plot_rate_and_ratio(df, name)  # 双轴图（原始值）
-    plot_rate_and_ratio_normalized(df, name)  # 单轴归一化图（对比趋势）
-    plot_top_ids(df, name)
-
+    # plot_message_rate(df, name)
+    # plot_injection_ratio_over_time(df, name)
+    # plot_rate_and_ratio(df, name)  # 双轴图（原始值）
+    # plot_rate_and_ratio_normalized(df, name)  # 单轴归一化图（对比趋势）
+    # plot_top_ids(df, name)
+    #
     top_id = df['CAN_ID'].value_counts().idxmax()
-    plot_data_combined_hex(df, name, cid=top_id)
-    plot_id_timewindow_scatter(df, name)
+    # plot_data_combined_hex(df, name, cid=top_id)
+    # plot_id_timewindow_scatter(df, name)
 
     # heatmap for most active ID
     # plot_data_bytes_heatmap_raw(df, name, cid=top_id)
+
+    plot_data_bytes_timeseries_raw(df, name, cid=top_id)
 
     # 返回 df 以便合并/进一步分析
     return df
